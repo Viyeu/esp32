@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32 Smart Home Dashboard</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #4361ee; --success: #10b981; --danger: #ef4444; --warning: #f59e0b;
+            --shadow-sm: 0 1px 3px rgba(0,0,0,0.1); --shadow: 0 4px 12px rgba(0,0,0,0.08);
+            --shadow-lg: 0 10px 30px rgba(0,0,0,0.12); --radius: 16px; --radius-sm: 12px;
+            --on-glow: 0 0 20px rgba(16, 185, 129, 0.4); --off-color: #94a3b8;
+            --bg-gradient: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+            --card-bg: #ffffff; --text: #1e293b; --text-light: #64748b;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Inter', sans-serif; background: var(--bg-gradient); color: var(--text); line-height: 1.6; padding: 16px; min-height: 100vh; }
+        h1 { text-align: center; font-size: 1.9rem; font-weight: 700; color: var(--primary); margin-bottom: 28px; display: flex; align-items: center; justify-content: center; gap: 10px; }
+        h1 i { font-size: 1.6rem; }
+        .container { max-width: 1480px; margin: auto; }
+
+        .deviceBox { background: var(--card-bg); border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 32px; overflow: hidden; transition: transform 0.2s ease; }
+        .deviceBox:hover { transform: translateY(-2px); }
+        .deviceBox h2 { margin: 0; padding: 18px 24px; background: linear-gradient(to right, var(--primary), #5b7aff); color: white; font-size: 1.25rem; font-weight: 600; display: flex; align-items: center; gap: 10px; }
+        .add-relay-btn { margin-left: auto; background: rgba(255,255,255,0.2); border: none; color: white; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 0.9rem; transition: 0.2s; }
+        .add-relay-btn:hover { background: rgba(255,255,255,0.3); }
+
+        .relay-grid { display: grid; gap: 18px; padding: 24px; grid-template-columns: repeat(2, 1fr); }
+        @media (min-width: 640px) { .relay-grid { grid-template-columns: repeat(3, 1fr); } }
+        @media (min-width: 1024px) { .relay-grid { grid-template-columns: repeat(4, 1fr); } }
+        @media (min-width: 1400px) { .relay-grid { grid-template-columns: repeat(5, 1fr); } }
+        @media (min-width: 1780px) { .relay-grid { grid-template-columns: repeat(6, 1fr); } }
+
+        .device-item { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: var(--radius-sm); padding: 20px 16px; text-align: center; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); position: relative; overflow: hidden; }
+        .device-item::before { content: ''; position: absolute; inset: 0; background: linear-gradient(135deg, rgba(67, 97, 238, 0.05), transparent); opacity: 0; transition: opacity 0.3s; }
+        .device-item:hover::before { opacity: 1; }
+        .device-item:hover { transform: translateY(-6px) scale(1.02); box-shadow: var(--shadow-lg); border-color: var(--primary); }
+
+        .device-icon-wrapper { display: inline-flex; align-items: center; justify-content: center; width: 72px; height: 72px; border-radius: 50%; margin-bottom: 14px; background: rgba(248, 250, 252, 0.8); box-shadow: var(--shadow-sm); transition: all 0.3s ease; cursor: pointer; }
+        .device-item:hover .device-icon-wrapper { background: rgba(67, 97, 238, 0.12); transform: scale(1.08); }
+
+        .device-icon { font-size: 2.6rem; transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); filter: drop-shadow(0 2px 6px rgba(0,0,0,0.15)); }
+        .device-icon.on { color: var(--success); transform: scale(1.2); animation: pulseGlow 2s infinite ease-in-out; text-shadow: var(--on-glow); }
+        .device-icon.off { color: var(--off-color); }
+        @keyframes pulseGlow { 0%, 100% { transform: scale(1.2); } 50% { transform: scale(1.3); } }
+
+        .device-name { font-weight: 600; font-size: 1.02rem; color: var(--text); margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; position: relative; padding-right: 50px; }
+        .edit-name, .delete-relay { position: absolute; right: 0; top: 50%; transform: translateY(-50%); font-size: 0.85rem; cursor: pointer; opacity: 0; transition: opacity 0.2s; padding: 2px 6px; border-radius: 4px; }
+        .device-name:hover .edit-name, .device-name:hover .delete-relay { opacity: 1; }
+        .edit-name { color: var(--primary); right: 28px; }
+        .delete-relay { color: #ef4444; right: 4px; }
+        .edit-name:hover { background: rgba(67, 97, 238, 0.1); }
+        .delete-relay:hover { background: rgba(239, 68, 68, 0.1); }
+
+        .device-gpio { font-size: 0.82rem; color: var(--text-light); font-weight: 500; }
+
+        .chart-container { background: var(--card-bg); border-radius: var(--radius); box-shadow: var(--shadow); padding: 24px; margin-top: 32px; overflow: hidden; }
+        .chart-container h3 { margin: 0 0 20px; font-size: 1.3rem; color: var(--primary); font-weight: 600; display: flex; align-items: center; gap: 8px; }
+        canvas { max-height: 440px; border-radius: var(--radius-sm); background: #fafafa; padding: 12px; }
+        .legend { display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; margin-top: 16px; font-size: 0.88rem; font-weight: 500; }
+        .legend-item { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; background: #f1f5f9; color: var(--text-light); }
+        .legend-color { width: 12px; height: 12px; border-radius: 50%; }
+
+        #loading { position: fixed; inset: 0; background: rgba(255,255,255,0.95); backdrop-filter: blur(8px); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 9999; }
+        #loading i { font-size: 3.2rem; color: var(--primary); margin-bottom: 16px; animation: spin 1s linear infinite; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        #toast { position: fixed; bottom: 24px; right: 24px; padding: 14px 20px; border-radius: 12px; color: white; font-weight: 500; box-shadow: var(--shadow-lg); transform: translateX(120%); transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); z-index: 1000; min-width: 200px; text-align: center; }
+
+        .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(6px); display: none; align-items: center; justify-content: center; z-index: 2000; }
+        .modal.active { display: flex; }
+        .modal-content { background: white; padding: 28px; border-radius: var(--radius); width: 90%; max-width: 460px; box-shadow: var(--shadow-lg); animation: modalShow 0.3s ease; }
+        @keyframes modalShow { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        .modal h3 { margin: 0 0 20px; font-size: 1.3rem; color: var(--primary); display: flex; align-items: center; gap: 8px; }
+        .form-group { margin-bottom: 18px; }
+        .form-group label { display: block; margin-bottom: 8px; font-weight: 500; color: var(--text); }
+        .form-group input, .form-group select { width: 100%; padding: 12px 14px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 1rem; outline: none; transition: border 0.2s; }
+        .form-group input:focus, .form-group select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(67, 97, 238, 0.15); }
+        .modal-buttons { display: flex; gap: 12px; justify-content: flex-end; margin-top: 20px; }
+        .modal-btn { padding: 10px 20px; border: none; border-radius: 8px; font-weight: 500; cursor: pointer; transition: all 0.2s; }
+        .modal-btn.cancel { background: #e2e8f0; color: #475569; }
+        .modal-btn.cancel:hover { background: #cbd5e1; }
+        .modal-btn.save { background: var(--primary); color: white; }
+        .modal-btn.save:hover { background: #3651d4; }
+        .icon-preview { font-size: 1.8rem; margin-top: 8px; text-align: center; color: var(--primary); }
+    </style>
+</head>
+<body>
+    <div id="loading"><i class="fas fa-spinner"></i><div>Đang kết nối đến server...</div></div>
+    <div id="toast"></div>
+
+    <div id="configModal" class="modal">
+        <div class="modal-content">
+            <h3><i class="fas fa-cog"></i> Cấu hình thiết bị</h3>
+            <div class="form-group">
+                <label for="cfgName">Tên thiết bị</label>
+                <input type="text" id="cfgName" maxlength="20" placeholder="VD: Đèn phòng khách">
+            </div>
+            <div class="form-group">
+                <label for="cfgGpio">GPIO (0-50)</label>
+                <select id="cfgGpio"></select>
+            </div>
+            <div class="form-group">
+                <label for="cfgType">Loại thiết bị</label>
+                <select id="cfgType">
+                    <option value="light">Đèn</option>
+                    <option value="fan">Quạt</option>
+                    <option value="pump">Bơm nước</option>
+                    <option value="tv">Tivi</option>
+                    <option value="ac">Máy lạnh</option>
+                    <option value="door">Cửa</option>
+                    <option value="curtain">Rèm</option>
+                    <option value="speaker">Loa</option>
+                    <option value="camera">Camera</option>
+                    <option value="relay">Relay (khác)</option>
+                </select>
+                <div class="icon-preview"><i id="iconPreview" class="fas fa-lightbulb"></i></div>
+            </div>
+            <div class="modal-buttons">
+                <button class="modal-btn cancel" onclick="closeConfigModal()">Hủy</button>
+                <button class="modal-btn save" onclick="saveConfig()">Lưu</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <h1><i class="fas fa-home"></i> Smart Home Dashboard (51 Relay)</h1>
+        <div id="devices"></div>
+
+        <div class="chart-container">
+            <h3><i class="fas fa-chart-line"></i> Lịch sử trạng thái (20 điểm gần nhất)</h3>
+            <canvas id="chart"></canvas>
+            <div class="legend" id="chartLegend"></div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        const devicesData = { timeLabels: [] };
+        let relayConfig = {};
+        const maxDataPoints = 20;
+        let currentEdit = { device: '', relay: '' };
+        let renderTimeout = null;
+
+        const deviceIcons = {
+            light: '<i class="fas fa-lightbulb"></i>',
+            relay: '<i class="fas fa-plug"></i>',
+            camera: '<i class="fas fa-video"></i>',
+            fan: '<i class="fas fa-fan"></i>',
+            pump: '<i class="fas fa-tint"></i>',
+            tv: '<i class="fas fa-tv"></i>',
+            ac: '<i class="fas fa-snowflake"></i>',
+            door: '<i class="fas fa-door-open"></i>',
+            curtain: '<i class="fas fa-window-maximize"></i>',
+            speaker: '<i class="fas fa-volume-up"></i>'
+        };
+
+        // Tạo GPIO 0-50
+        const gpioSelect = document.getElementById('cfgGpio');
+        for (let i = 0; i <= 50; i++) {
+            const opt = document.createElement('option');
+            opt.value = i; opt.textContent = `GPIO ${i}`;
+            gpioSelect.appendChild(opt);
+        }
+
+        const ctx = document.getElementById('chart').getContext('2d');
+        const chart = new Chart(ctx, {
+            type: 'line',
+            data: { labels: [], datasets: [] },
+            options: {
+                responsive: true,
+                animation: { duration: 600, easing: 'easeOutQuart' },
+                interaction: { mode: 'index', intersect: false },
+                scales: { y: { min: 0, max: 1, ticks: { stepSize: 1 } } },
+                plugins: { legend: { display: false } }
+            }
+        });
+        const fixedColors = ['#4361ee','#10b981','#ef4444','#f59e0b','#8b5cf6','#ec4899','#06b6d4','#84cc16','#f97316','#14b8a6'];
+
+        function debounceRender() {
+            clearTimeout(renderTimeout);
+            renderTimeout = setTimeout(() => { renderDevices(); updateChart(); }, 50);
+        }
+
+        function renderDevices() {
+            const container = document.getElementById('devices');
+            container.innerHTML = '';
+            const fragment = new DocumentFragment();
+
+            for (const deviceId in devicesData) {
+                if (deviceId === 'timeLabels') continue;
+
+                const box = document.createElement('div');
+                box.className = 'deviceBox';
+                box.innerHTML = `
+                    <h2><i class="fas fa-microchip"></i> ${deviceId}
+                        <button class="add-relay-btn" onclick="addNewRelay('${deviceId}')">+ Thêm Relay</button>
+                    </h2>
+                    <div class="relay-grid" id="grid-${deviceId}"></div>`;
+                const grid = box.querySelector(`#grid-${deviceId}`);
+
+                const config = relayConfig[deviceId] || {};
+                let relays = Object.keys(config).filter(k => /^relay\d+$/.test(k))
+                    .sort((a,b) => parseInt(a.match(/\d+/)[0]) - parseInt(b.match(/\d+/)[0]));
+
+                // Nếu chưa có relay nào → tạo mặc định 8 relay
+                if (relays.length === 0) {
+                    for (let i = 1; i <= 8; i++) relays.push(`relay${i}`);
+                }
+
+                relays.forEach(relayKey => {
+                    const state = devicesData[deviceId]?.[relayKey]?.slice(-1)[0] ?? 0;
+                    const cfg = config[relayKey] || { name: `Thiết bị ${relayKey.replace('relay','')}`, gpio: '?', type: 'relay' };
+
+                    const item = document.createElement('div');
+                    item.className = 'device-item';
+                    item.innerHTML = `
+                        <div class="device-icon-wrapper" data-device="${deviceId}" data-relay="${relayKey}" data-state="${state}" title="Click để ${state ? 'TẮT' : 'BẬT'}">
+                            ${getDeviceIcon(cfg.type, state)}
+                        </div>
+                        <div class="device-name">
+                            ${cfg.name}
+                            <i class="fas fa-cog edit-name" data-device="${deviceId}" data-relay="${relayKey}" data-name="${cfg.name}" data-gpio="${cfg.gpio}" data-type="${cfg.type}"></i>
+                            <i class="fas fa-trash delete-relay" data-device="${deviceId}" data-relay="${relayKey}" title="Xóa relay này"></i>
+                        </div>
+                        <div class="device-gpio">GPIO: <strong>${cfg.gpio === '?' ? '?' : cfg.gpio}</strong> <small>(${relayKey})</small></div>
+                    `;
+                    grid.appendChild(item);
+                });
+                fragment.appendChild(box);
+            }
+            container.appendChild(fragment);
+        }
+
+        // Thêm relay mới (tối đa 51)
+        window.addNewRelay = function(device) {
+            const used = Object.keys(relayConfig[device] || {}).filter(k => /^relay\d+$/.test(k)).map(k => parseInt(k.match(/\d+/)[0]));
+            let next = 1;
+            while (used.includes(next)) next++;
+            if (next > 51) return showToast('Đã đạt tối đa 51 relay!', false);
+            openConfigModal(device, `relay${next}`, '', '', 'relay');
+        };
+
+        document.getElementById('devices').addEventListener('click', (e) => {
+            const wrapper = e.target.closest('.device-icon-wrapper');
+            const edit = e.target.closest('.edit-name');
+            const del = e.target.closest('.delete-relay');
+
+            if (wrapper) {
+                const { device, relay, state } = wrapper.dataset;
+                toggleDevice(device, relay, parseInt(state));
+            }
+            if (edit) {
+                const { device, relay, name, gpio, type } = edit.dataset;
+                openConfigModal(device, relay, name, gpio, type);
+                e.stopPropagation();
+            }
+            if (del) {
+                const { device, relay } = del.dataset;
+                if (confirm(`Xóa vĩnh viễn ${relay} của ${device}?`)) {
+                    fetch('/api/config', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ device, relay, action: 'delete' })
+                    }).then(() => {
+                        showToast(`Đã xóa ${relay}`);
+                        fetch('/api/config').then(r => r.json()).then(cfg => { relayConfig = cfg; debounceRender(); });
+                    });
+                }
+            }
+        });
+
+        function getDeviceIcon(type, state) {
+            const icon = deviceIcons[type] || '<i class="fas fa-cube"></i>';
+            return `<div class="${state ? 'device-icon on' : 'device-icon off'}">${icon}</div>`;
+        }
+
+        function findFirstFreeGpio(device, currentRelay) {
+            const used = new Set();
+            if (relayConfig[device]) {
+                for (const r in relayConfig[device]) {
+                    if (r !== currentRelay && relayConfig[device][r]?.gpio !== undefined) {
+                        used.add(relayConfig[device][r].gpio);
+                    }
+                }
+            }
+            for (let g = 0; g <= 50; g++) if (!used.has(g)) return g;
+            return 0;
+        }
+
+        function openConfigModal(device, relay, name, gpio, type) {
+            currentEdit = { device, relay };
+            document.getElementById('cfgName').value = name || '';
+            document.getElementById('cfgType').value = type || 'relay';
+
+            const used = new Set();
+            if (relayConfig[device]) {
+                for (const r in relayConfig[device]) {
+                    if (r !== relay && relayConfig[device][r]?.gpio !== undefined) {
+                        used.add(relayConfig[device][r].gpio);
+                    }
+                }
+            }
+            Array.from(gpioSelect.options).forEach(opt => {
+                const val = parseInt(opt.value);
+                const isCurrent = val === parseInt(gpio || -1);
+                opt.disabled = used.has(val) && !isCurrent;
+            });
+
+            const suggested = findFirstFreeGpio(device, relay);
+            gpioSelect.value = gpio !== undefined && gpio !== '?' ? gpio : suggested;
+
+            const icon = deviceIcons[type || 'relay'] || '<i class="fas fa-cube"></i>';
+            document.getElementById('iconPreview').outerHTML = `<div class="icon-preview">${icon}</div>`;
+            document.getElementById('configModal').classList.add('active');
+        }
+
+        function closeConfigModal() {
+            document.getElementById('configModal').classList.remove('active');
+        }
+
+        function saveConfig() {
+            const name = document.getElementById('cfgName').value.trim();
+            let gpio = parseInt(document.getElementById('cfgGpio').value);
+            const type = document.getElementById('cfgType').value;
+
+            if (!name || name.length > 20) return showToast('Tên phải 1-20 ký tự', false);
+            if (isNaN(gpio) || gpio < 0 || gpio > 50) {
+                gpio = findFirstFreeGpio(currentEdit.device, currentEdit.relay);
+                showToast(`Tự động gán GPIO ${gpio}`, true);
+            }
+
+            fetch('/api/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ device: currentEdit.device, relay: currentEdit.relay, name, gpio, type })
+            })
+            .then(r => r.json())
+            .then(cfg => {
+                relayConfig = cfg;
+                debounceRender();
+                closeConfigModal();
+                showToast(`Đã lưu: ${name} (GPIO ${gpio})`);
+            })
+            .catch(() => showToast('Lỗi lưu cấu hình', false));
+        }
+
+        function toggleDevice(device, relay, currentState) {
+            const cmd = currentState ? `${relay}_off` : `${relay}_on`;
+            socket.emit('command', { device, cmd });
+            showToast(`${currentState ? 'Tắt' : 'Bật'} ${relay.replace('relay','R')}`);
+        }
+
+        function showToast(msg, success = true) {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.style.background = success ? 'var(--success)' : 'var(--danger)';
+            toast.style.transform = 'translateX(0)';
+            setTimeout(() => toast.style.transform = 'translateX(120%)', 3200);
+        }
+
+        function updateChart() {
+            const legend = document.getElementById('chartLegend');
+            legend.innerHTML = '';
+            chart.data.labels = devicesData.timeLabels;
+            chart.data.datasets = [];
+            let colorIdx = 0;
+
+            for (const dev in devicesData) {
+                if (dev === 'timeLabels') continue;
+                for (const key in devicesData[dev]) {
+                    if (!/^relay\d+$/.test(key)) continue;
+                    const data = devicesData[dev][key];
+                    if (data.length === 0) continue;
+
+                    const color = fixedColors[colorIdx % fixedColors.length];
+                    chart.data.datasets.push({
+                        label: `${dev} ${key}`,
+                        data: data,
+                        borderColor: color,
+                        backgroundColor: color + '30',
+                        fill: false,
+                        tension: 0.35,
+                        pointRadius: 3.5
+                    });
+                    const item = document.createElement('div');
+                    item.className = 'legend-item';
+                    item.innerHTML = `<div class="legend-color" style="background:${color}"></div><span>${dev} ${key}</span>`;
+                    legend.appendChild(item);
+                    colorIdx++;
+                }
+            }
+            chart.update('quiet');
+        }
+
+        socket.on('connect', () => {
+            document.getElementById('loading').style.display = 'none';
+            showToast('Kết nối thành công!');
+        });
+
+        socket.on('disconnect', () => {
+            document.getElementById('loading').style.display = 'flex';
+            showToast('Mất kết nối!', false);
+        });
+
+        socket.on('relayStatus', (data) => {
+            const dev = data.device;
+            if (!devicesData[dev]) devicesData[dev] = {};
+            const now = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+            if (!devicesData.timeLabels.includes(now)) {
+                devicesData.timeLabels.push(now);
+                if (devicesData.timeLabels.length > maxDataPoints) devicesData.timeLabels.shift();
+            }
+
+            for (const key in data) {
+                if (!/^relay\d+$/.test(key)) continue;
+                if (!devicesData[dev][key]) devicesData[dev][key] = [];
+                devicesData[dev][key].push(data[key]);
+                if (devicesData[dev][key].length > maxDataPoints) devicesData[dev][key].shift();
+            }
+            debounceRender();
+        });
+
+        socket.on('relayHistory', (rows) => {
+            devicesData.timeLabels = [];
+            rows.forEach(r => {
+                const ts = new Date(r.timestamp).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+                devicesData.timeLabels.push(ts);
+                const dev = r.device;
+                if (!devicesData[dev]) devicesData[dev] = {};
+                for (let i = 1; i <= 51; i++) {
+                    const k = `relay${i}`;
+                    if (r[k] !== undefined) {
+                        if (!devicesData[dev][k]) devicesData[dev][k] = [];
+                        devicesData[dev][k].push(r[k]);
+                    }
+                }
+            });
+            debounceRender();
+        });
+
+        socket.on('configUpdate', (cfg) => { relayConfig = cfg; debounceRender(); });
+
+        fetch('/api/config').then(r => r.json()).then(cfg => { relayConfig = cfg; debounceRender(); });
+
+        document.getElementById('cfgType').addEventListener('change', function() {
+            const icon = deviceIcons[this.value] || '<i class="fas fa-cube"></i>';
+            document.getElementById('iconPreview').outerHTML = `<div class="icon-preview">${icon}</div>`;
+        });
+
+        document.getElementById('configModal').addEventListener('click', (e) => {
+            if (e.target === document.getElementById('configModal')) closeConfigModal();
+        });
+    </script>
+</body>
+</html>
